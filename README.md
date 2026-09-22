@@ -17,6 +17,10 @@ experience working with warehouse management systems.
 - Job completion
 - Persistent inventory data
 
+## How To Run
+  - npm install
+  - npm expo start
+
 ## Tech Stack
 
 - React Native
@@ -24,7 +28,7 @@ experience working with warehouse management systems.
 - TypeScript
 - LocalStorage
 
-## Screenshots
+ ## Screenshots
 
 MVP / Version 1
 <img width="1470" height="835" alt="Screenshot 2026-09-22 at 4 42 34 PM" src="https://github.com/user-attachments/assets/34d19c20-11c7-482f-a07a-a2d152cb7c4e" />
