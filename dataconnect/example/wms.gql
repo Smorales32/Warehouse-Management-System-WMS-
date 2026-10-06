@@ -1,0 +1,613 @@
+# ============================================================
+# WMS APP - FIREBASE SQL CONNECT OPERATIONS
+# ============================================================
+
+
+# ============================================================
+# USER
+# ============================================================
+
+mutation CreateUser(
+  $username: String!
+) @auth(level: USER) {
+  user_insert(
+    data: {
+      username: $username
+      authReference_expr: "auth.uid"
+      role: "warehouse_user"
+    }
+  )
+}
+
+query GetCurrentUser @auth(level: USER) {
+  users(
+    where: {
+      authReference: { eq_expr: "auth.uid" }
+    }
+  ) {
+    id
+    username
+    role
+    createdDate
+  }
+}
+
+
+# ============================================================
+# INVENTORY SEARCH
+# ============================================================
+
+query GetInventoryBySearch(
+  $search: String!
+) @auth(level: USER) {
+  inventories(
+    where: {
+      _or: [
+        { resinName: { contains: $search } }
+        { sku: { contains: $search } }
+        { warehouseLocation: { contains: $search } }
+      ]
+    }
+  ) {
+    id
+    resinName
+    sku
+    warehouseLocation
+    quantity
+    createdDate
+    updatedDate
+  }
+}
+
+
+# ============================================================
+# RECEIVE NEW INVENTORY
+# ============================================================
+
+query GetAllInventory @auth(
+  level: USER
+  insecureReason: "Authenticated WMS users need to view shared warehouse inventory."
+) {
+  inventories(
+    orderBy: [
+      { resinName: ASC }
+    ]
+  ) {
+    id
+    resinName
+    sku
+    warehouseLocation
+    quantity
+    createdDate
+    updatedDate
+  }
+}
+
+
+
+mutation ReceiveNewInventory(
+  $resinName: String!
+  $sku: String!
+  $warehouseLocation: String!
+  $quantity: Int!
+) @auth(level: USER) @transaction {
+
+  query
+  @check(
+    expr: "vars.quantity > 0"
+    message: "Quantity must be greater than zero."
+  )
+  @check(
+    expr: "response.query.users.size() == 1"
+    message: "Authenticated WMS user was not found."
+  ) {
+    users(
+      where: {
+        authReference: { eq_expr: "auth.uid" }
+      }
+    ) {
+      id
+    }
+  }
+
+  inv: inventory_insert(
+    data: {
+      resinName: $resinName
+      sku: $sku
+      warehouseLocation: $warehouseLocation
+      quantity: $quantity
+    }
+  )
+
+  inventoryTransaction_insert(
+    data: {
+      inventoryItemId_expr: "response.inv.id"
+      userId_expr: "response.query.users[0].id"
+      transactionType: "Receive"
+      quantity: $quantity
+      previousQuantity: 0
+      newQuantity: $quantity
+      reason: "Initial inventory receipt"
+    }
+  )
+}
+
+
+# ============================================================
+# RECEIVE EXISTING INVENTORY
+# ============================================================
+
+mutation ReceiveExistingInventory(
+  $inventoryId: UUID!
+  $quantity: Int!
+) @auth(level: USER) @transaction {
+
+  query
+  @check(
+    expr: "response.query.inventory != null"
+    message: "Inventory item was not found."
+  )
+  @check(
+    expr: "vars.quantity > 0"
+    message: "Quantity must be greater than zero."
+  )
+  @check(
+    expr: "response.query.users.size() == 1"
+    message: "Authenticated WMS user was not found."
+  ) {
+    inventory(
+      id: $inventoryId
+    ) {
+      id
+      quantity
+    }
+
+    users(
+      where: {
+        authReference: { eq_expr: "auth.uid" }
+      }
+    ) {
+      id
+    }
+  }
+
+  inventory_update(
+    id: $inventoryId
+    data: {
+      quantity_update: {
+        inc: $quantity
+      }
+      updatedDate_expr: "request.time"
+    }
+  )
+
+  inventoryTransaction_insert(
+    data: {
+      inventoryItemId: $inventoryId
+      userId_expr: "response.query.users[0].id"
+      transactionType: "Receive"
+      quantity: $quantity
+      previousQuantity_expr: "response.query.inventory.quantity"
+      newQuantity_expr: "response.query.inventory.quantity + vars.quantity"
+      reason: "Inventory receipt"
+    }
+  )
+}
+
+
+# ============================================================
+# CREATE JOB
+# ============================================================
+
+mutation CreateJob(
+  $jobNumber: String!
+  $inventoryItemId: UUID!
+  $requiredQuantity: Int!
+) @auth(level: USER) {
+
+  job_insert(
+    data: {
+      jobNumber: $jobNumber
+      inventoryItemId: $inventoryItemId
+      requiredQuantity: $requiredQuantity
+      pickedQuantity: 0
+      status: "Open"
+    }
+  )
+}
+
+
+# ============================================================
+# GET JOB BY NUMBER
+# ============================================================
+
+query GetJobByNumber(
+  $jobNumber: String!
+) @auth(level: USER) {
+
+  jobs(
+    where: {
+      jobNumber: { eq: $jobNumber }
+    }
+  ) {
+    id
+    jobNumber
+    inventoryItem {
+      id
+      resinName
+      sku
+      warehouseLocation
+      quantity
+    }
+    requiredQuantity
+    pickedQuantity
+    status
+    createdDate
+    updatedDate
+  }
+}
+
+
+# ============================================================
+# GET ALL JOBS
+# ============================================================
+
+query GetAllJobs @auth(level: USER) {
+
+  jobs(
+    orderBy: [
+      { createdDate: DESC }
+    ]
+  ) {
+    id
+    jobNumber
+    inventoryItem {
+      id
+      resinName
+      sku
+      warehouseLocation
+    }
+    requiredQuantity
+    pickedQuantity
+    status
+    createdDate
+    updatedDate
+  }
+}
+
+
+# ============================================================
+# SHORT PICK
+# ============================================================
+
+mutation RecordShortPick(
+  $jobId: UUID!
+  $quantity: Int!
+) @auth(level: USER) @transaction {
+
+  query
+  @check(
+    expr: "response.query.job != null"
+    message: "Job was not found."
+  )
+  @check(
+    expr: "response.query.users.size() == 1"
+    message: "Authenticated WMS user was not found."
+  )
+  @check(
+    expr: "vars.quantity > 0"
+    message: "Pick quantity must be greater than zero."
+  ) {
+    job(
+      id: $jobId
+    ) {
+      id
+      pickedQuantity
+      requiredQuantity
+      status
+      inventoryItem {
+        id
+        quantity
+      }
+    }
+
+    users(
+      where: {
+        authReference: { eq_expr: "auth.uid" }
+      }
+    ) {
+      id
+    }
+  }
+
+  job_update(
+    id: $jobId
+    data: {
+      pickedQuantity_update: {
+        inc: $quantity
+      }
+      status: "Short Pick"
+      updatedDate_expr: "request.time"
+    }
+  )
+
+  inventoryTransaction_insert(
+    data: {
+      inventoryItemId_expr: "response.query.job.inventoryItem.id"
+      jobId: $jobId
+      userId_expr: "response.query.users[0].id"
+      transactionType: "ShortPick"
+      quantity: $quantity
+      previousQuantity_expr: "response.query.job.inventoryItem.quantity"
+      newQuantity_expr: "response.query.job.inventoryItem.quantity"
+      reason: "Short pick"
+    }
+  )
+}
+
+
+# ============================================================
+# OVER PICK
+# ============================================================
+
+mutation RecordOverPick(
+  $jobId: UUID!
+  $quantity: Int!
+) @auth(level: USER) @transaction {
+
+  query
+  @check(
+    expr: "response.query.job != null"
+    message: "Job was not found."
+  )
+  @check(
+    expr: "response.query.users.size() == 1"
+    message: "Authenticated WMS user was not found."
+  )
+  @check(
+    expr: "vars.quantity > 0"
+    message: "Pick quantity must be greater than zero."
+  ) {
+    job(
+      id: $jobId
+    ) {
+      id
+      pickedQuantity
+      requiredQuantity
+      status
+      inventoryItem {
+        id
+        quantity
+      }
+    }
+
+    users(
+      where: {
+        authReference: { eq_expr: "auth.uid" }
+      }
+    ) {
+      id
+    }
+  }
+
+  job_update(
+    id: $jobId
+    data: {
+      pickedQuantity_update: {
+        inc: $quantity
+      }
+      status: "Over-Pick"
+      updatedDate_expr: "request.time"
+    }
+  )
+
+  inventoryTransaction_insert(
+    data: {
+      inventoryItemId_expr: "response.query.job.inventoryItem.id"
+      jobId: $jobId
+      userId_expr: "response.query.users[0].id"
+      transactionType: "OverPick"
+      quantity: $quantity
+      previousQuantity_expr: "response.query.job.inventoryItem.quantity"
+      newQuantity_expr: "response.query.job.inventoryItem.quantity"
+      reason: "Over pick"
+    }
+  )
+}
+
+
+# ============================================================
+# COMPLETE PICK
+# ============================================================
+
+mutation ProcessCompletePick(
+  $jobId: UUID!
+  $requestedQuantity: Int!
+) @auth(level: USER) @transaction {
+
+  query
+  @check(
+    expr: "response.query.job != null"
+    message: "Job was not found."
+  )
+  @check(
+    expr: "response.query.job.status == 'Open'"
+    message: "Job is not open."
+  )
+  @check(
+    expr: "vars.requestedQuantity > 0"
+    message: "Pick quantity must be greater than zero."
+  )
+  @check(
+    expr: "response.query.job.pickedQuantity + vars.requestedQuantity == response.query.job.requiredQuantity"
+    message: "Pick quantity does not complete the job."
+  )
+  @check(
+    expr: "response.query.job.inventoryItem.quantity >= vars.requestedQuantity"
+    message: "Insufficient inventory."
+  )
+  @check(
+    expr: "response.query.users.size() == 1"
+    message: "Authenticated WMS user was not found."
+  ) {
+    job(
+      id: $jobId
+    ) {
+      id
+      pickedQuantity
+      requiredQuantity
+      status
+
+      inventoryItem {
+        id
+        quantity
+      }
+    }
+
+    users(
+      where: {
+        authReference: { eq_expr: "auth.uid" }
+      }
+    ) {
+      id
+    }
+  }
+
+  job_update(
+    id: $jobId
+    data: {
+      pickedQuantity_update: {
+        inc: $requestedQuantity
+      }
+      status: "Complete"
+      updatedDate_expr: "request.time"
+    }
+  )
+
+  inventory_update(
+    key: {
+      id_expr: "response.query.job.inventoryItem.id"
+    }
+    data: {
+      quantity_update: {
+        dec: $requestedQuantity
+      }
+      updatedDate_expr: "request.time"
+    }
+  )
+
+  inventoryTransaction_insert(
+    data: {
+      inventoryItemId_expr: "response.query.job.inventoryItem.id"
+      jobId: $jobId
+      userId_expr: "response.query.users[0].id"
+      transactionType: "Pick"
+      quantity: $requestedQuantity
+      previousQuantity_expr: "response.query.job.inventoryItem.quantity"
+      newQuantity_expr: "response.query.job.inventoryItem.quantity - vars.requestedQuantity"
+      reason: "Completed pick"
+    }
+  )
+}
+
+
+# ============================================================
+# ADJUST INVENTORY
+# ============================================================
+
+mutation AdjustInventory(
+  $inventoryId: UUID!
+  $newQuantity: Int!
+  $reason: String!
+) @auth(level: USER) @transaction {
+
+  query
+  @check(
+    expr: "response.query.inventory != null"
+    message: "Inventory item was not found."
+  )
+  @check(
+    expr: "vars.newQuantity >= 0"
+    message: "Inventory quantity cannot be negative."
+  )
+  @check(
+    expr: "response.query.users.size() == 1"
+    message: "Authenticated WMS user was not found."
+  ) {
+    inventory(
+      id: $inventoryId
+    ) {
+      id
+      quantity
+    }
+
+    users(
+      where: {
+        authReference: { eq_expr: "auth.uid" }
+      }
+    ) {
+      id
+    }
+  }
+
+  inventory_update(
+    id: $inventoryId
+    data: {
+      quantity: $newQuantity
+      updatedDate_expr: "request.time"
+    }
+  )
+
+  inventoryTransaction_insert(
+    data: {
+      inventoryItemId: $inventoryId
+      userId_expr: "response.query.users[0].id"
+      transactionType: "Adjustment"
+      quantity_expr: "vars.newQuantity - response.query.inventory.quantity"
+      previousQuantity_expr: "response.query.inventory.quantity"
+      newQuantity: $newQuantity
+      reason: $reason
+    }
+  )
+}
+
+
+# ============================================================
+# TRANSACTION HISTORY
+# ============================================================
+
+query GetInventoryTransactions @auth(level: USER) {
+
+  inventoryTransactions(
+    orderBy: [
+      { createdDate: DESC }
+    ]
+  ) {
+    id
+
+    inventoryItem {
+      id
+      resinName
+      sku
+      warehouseLocation
+    }
+
+    job {
+      id
+      jobNumber
+    }
+
+    user {
+      id
+      username
+      role
+    }
+
+    transactionType
+    quantity
+    previousQuantity
+    newQuantity
+    reason
+    createdDate
+  }
+}

@@ -1,0 +1,37 @@
+type User @table {
+  username: String!
+  authReference: String! @unique
+  role: String!
+  createdDate: Timestamp! @default(expr: "request.time")
+}
+
+type Inventory @table {
+  resinName: String! @index
+  sku: String! @index
+  warehouseLocation: String! @index
+  quantity: Int!
+  createdDate: Timestamp! @default(expr: "request.time")
+  updatedDate: Timestamp! @default(expr: "request.time")
+}
+
+type Job @table {
+  jobNumber: String! @unique
+  inventoryItem: Inventory!
+  requiredQuantity: Int!
+  pickedQuantity: Int!
+  status: String! @index
+  createdDate: Timestamp! @default(expr: "request.time")
+  updatedDate: Timestamp! @default(expr: "request.time")
+}
+
+type InventoryTransaction @table {
+  inventoryItem: Inventory!
+  job: Job
+  user: User!
+  transactionType: String! @index
+  quantity: Int!
+  previousQuantity: Int!
+  newQuantity: Int!
+  reason: String
+  createdDate: Timestamp! @default(expr: "request.time") @index
+}

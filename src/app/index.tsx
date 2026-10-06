@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
+import { getAllInventory } from "@dataconnect/generated";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { useState } from "react";
+import { auth } from "../firebase";
+
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -7,6 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+
 
 type InventoryItem = {
   resin: string;
@@ -86,6 +92,11 @@ export default function Index() {
 
   // LOOK UP
   const [search, setSearch] = useState("");
+  
+  //LOOK UP SCREEN 
+  const [lookupResults, setLookupResults] = useState<InventoryItem[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState("");
 
   // INVENTORY ADJUSTMENT
   const [adjustResin, setAdjustResin] = useState("");
@@ -106,68 +117,44 @@ export default function Index() {
   const [createJobMessage, setCreateJobMessage] =
     useState("");
 
-  const [loaded, setLoaded] = useState(false);
-
-  // LOAD SAVED DATA WHEN THE APP STARTS
-  useEffect(() => {
-    try {
-      const savedInventory =
-        localStorage.getItem("wms_inventory");
-
-      const savedJobs =
-        localStorage.getItem("wms_jobs");
-
-      if (savedInventory) {
-        setInventory(JSON.parse(savedInventory));
-      }
-
-      if (savedJobs) {
-        setJobs(JSON.parse(savedJobs));
-      }
-    } catch (error) {
-      console.log("Could not load saved WMS data.");
-    }
-
-    setLoaded(true);
-  }, []);
-
-  // SAVE INVENTORY
-  useEffect(() => {
-    if (!loaded) return;
-
-    try {
-      localStorage.setItem(
-        "wms_inventory",
-        JSON.stringify(inventory)
-      );
-    } catch (error) {
-      console.log("Could not save inventory.");
-    }
-  }, [inventory, loaded]);
-
-  // SAVE JOBS
-  useEffect(() => {
-    if (!loaded) return;
-
-    try {
-      localStorage.setItem(
-        "wms_jobs",
-        JSON.stringify(jobs)
-      );
-    } catch (error) {
-      console.log("Could not save jobs.");
-    }
-  }, [jobs, loaded]);
 
   // LOGIN
-  const login = () => {
-    if (
-      username.trim().toLowerCase() === "admin" &&
-      password === "1234"
-    ) {
-      setScreen("menu");
-    }
-  };
+  const login = async () => {
+  const email = username.trim();
+
+  if (email === "" || password === "") {
+    return;
+  }
+
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+
+  
+    const result = await getAllInventory();
+
+
+  const firebaseInventory: InventoryItem[] =
+  result.data.inventories.map((item) => ({
+    resin: item.resinName,
+    sku: item.sku,
+    location: item.warehouseLocation,
+    quantity: item.quantity,
+  }));
+
+setInventory(firebaseInventory);
+
+console.log(
+  "Firebase SQL Connect inventory:",
+  firebaseInventory
+);
+
+setScreen("menu");
+
+
+  } catch (error) {
+    console.log("Firebase login failed:", error);
+  }
+};
 
   // RECEIVE MATERIAL
   const receiveMaterial = () => {
@@ -627,65 +614,69 @@ export default function Index() {
     }
   };
 
+
   // LOGIN SCREEN
-  if (screen === "login") {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>
-          WMS
-        </Text>
+if (screen === "login") {
+  return (
+    <View style={styles.container}>
+      <Image
+      source={require("../../assets/images/sm-logistics-logo.png")}
+      style={styles.logo}
+       resizeMode="contain"
+       />
 
-        <Text style={styles.subtitle}>
-          Warehouse Management System
-        </Text>
+      <Text style={styles.subtitle}>
+        Warehouse Management System
+      </Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-        />
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        value={username}
+        onChangeText={setUsername}
+        autoCapitalize="none"
+      />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+      />
 
-        <Pressable
-          style={styles.button}
-          onPress={login}
-        >
-          <Text style={styles.buttonText}>
-            LOGIN
-          </Text>
-        </Pressable>
-
-        <Text style={styles.demo}>
-          Login: admin / 1234
-        </Text>
-      </View>
-    );
-  }
-
-  // MAIN MENU
-  if (screen === "menu") {
-    return (
-      <ScrollView
-        contentContainerStyle={
-          styles.menuScroll
-        }
+      <Pressable
+        style={styles.button}
+        onPress={login}
       >
-        <Text style={styles.title}>
-          WMS
+        <Text style={styles.buttonText}>
+          LOGIN
         </Text>
+      </Pressable>
 
-        <Text style={styles.subtitle}>
-          Main Menu
-        </Text>
+      <Text style={styles.demo}>
+        Sign in with your Firebase account
+      </Text>
+    </View>
+  );
+}
+
+// MAIN MENU
+if (screen === "menu") {
+  return (
+    <ScrollView contentContainerStyle={styles.menuScroll}>
+
+      <Image
+        source={require("../../assets/images/sm-logistics-logo.png")}
+        style={styles.logo}
+        resizeMode="contain"
+      />
+
+      <Text style={styles.subtitle}>
+        Main Menu
+      </Text>
+
+      <View style={styles.menuGrid}>
 
         <Pressable
           style={styles.menuButton}
@@ -694,9 +685,8 @@ export default function Index() {
             setScreen("pick");
           }}
         >
-          <Text style={styles.buttonText}>
-            PICK RESIN
-          </Text>
+          <Text style={styles.menuIcon}>📦</Text>
+<Text style={styles.buttonText}>PICK RESIN</Text>
         </Pressable>
 
         <Pressable
@@ -706,9 +696,8 @@ export default function Index() {
             setScreen("lookup");
           }}
         >
-          <Text style={styles.buttonText}>
-            LOOK UP
-          </Text>
+          <Text style={styles.menuIcon}>🔎</Text>
+<Text style={styles.buttonText}>LOOK UP</Text>
         </Pressable>
 
         <Pressable
@@ -718,9 +707,8 @@ export default function Index() {
             setScreen("adjustment");
           }}
         >
-          <Text style={styles.buttonText}>
-            INVENTORY ADJUSTMENT
-          </Text>
+          <Text style={styles.menuIcon}>📊</Text>
+<Text style={styles.buttonText}>INVENTORY ADJUSTMENT</Text>
         </Pressable>
 
         <Pressable
@@ -730,9 +718,8 @@ export default function Index() {
             setScreen("createJob");
           }}
         >
-          <Text style={styles.buttonText}>
-            CREATE JOB
-          </Text>
+         <Text style={styles.menuIcon}>📝</Text>
+<Text style={styles.buttonText}>CREATE JOB</Text>
         </Pressable>
 
         <Pressable
@@ -742,24 +729,24 @@ export default function Index() {
             setScreen("receive");
           }}
         >
-          <Text style={styles.buttonText}>
-            RECEIVE
-          </Text>
+          <Text style={styles.menuIcon}>📥</Text>
+<Text style={styles.buttonText}>RECEIVE</Text>
         </Pressable>
 
-        <Pressable
-          style={styles.logout}
-          onPress={() =>
-            setScreen("login")
-          }
-        >
-          <Text style={styles.logoutText}>
-            LOG OUT
-          </Text>
-        </Pressable>
-      </ScrollView>
-    );
-  }
+      </View>
+
+      <Pressable
+        style={styles.logout}
+        onPress={() => setScreen("login")}
+      >
+        <Text style={styles.logoutText}>
+          LOG OUT
+        </Text>
+      </Pressable>
+
+    </ScrollView>
+  );
+}
 
   // PICK SCREEN
   if (screen === "pick") {
@@ -1369,34 +1356,20 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     padding: 30,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#F4F7FB",
   },
 
   scroll: {
     flexGrow: 1,
     padding: 30,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#F4F7FB",
   },
 
   menuScroll: {
     flexGrow: 1,
     justifyContent: "center",
     padding: 30,
-    backgroundColor: "#f5f5f5",
-  },
-
-  title: {
-    fontSize: 38,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-
-  subtitle: {
-    fontSize: 17,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 35,
+    backgroundColor: "#F4F7FB",
   },
 
   label: {
@@ -1405,36 +1378,75 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 
+logo: {
+  width: 240,
+  height: 180,
+  alignSelf: "center",
+  marginBottom: 10,
+},
+
+title: {
+    fontSize: 42,
+    fontWeight: "800",
+    textAlign: "center",
+    color: "#0B1F3A",
+    marginBottom: 8,
+  },
+
+  subtitle: {
+    fontSize: 16,
+    color: "#64748B",
+    textAlign: "center",
+    marginBottom: 35,
+  },
+
   input: {
-    backgroundColor: "white",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 15,
+    borderColor: "#CBD5E1",
+    borderRadius: 10,
+    padding: 16,
     fontSize: 16,
     marginBottom: 15,
+    color: "#0F172A",
   },
 
   button: {
-    backgroundColor: "#222",
+    backgroundColor: "#0B5ED7",
     padding: 18,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: "center",
     marginBottom: 15,
   },
 
-  menuButton: {
-    backgroundColor: "#222",
-    padding: 22,
-    borderRadius: 8,
-    alignItems: "center",
-    marginBottom: 15,
-  },
+ menuGrid: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  justifyContent: "space-between",
+},
+
+menuIcon: {
+  fontSize: 30,
+  marginBottom: 8,
+},
+
+
+menuButton: {
+  backgroundColor: "#0B5ED7",
+  width: "48%",
+  height: 120,
+  borderRadius: 14,
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: 14,
+  padding: 10,
+  elevation: 3,
+},
 
   buttonText: {
-    color: "white",
+    color: "#FFFFFF",
     fontSize: 17,
-    fontWeight: "bold",
+    fontWeight: "700",
     textAlign: "center",
   },
 
